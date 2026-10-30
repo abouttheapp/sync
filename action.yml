@@ -1,0 +1,129 @@
+name: Report release to AboutTheApp
+description: Register a product version and optionally record its installation in AboutTheApp.
+author: AboutTheApp
+
+branding:
+  icon: upload-cloud
+  color: blue
+
+inputs:
+  token:
+    description: AboutTheApp CI/CD token. Store it as a GitHub Actions secret.
+    required: true
+  alias:
+    description: Product alias in AboutTheApp.
+    required: true
+  version:
+    description: Version string to register, for example 1.2.3 or 26.08.4.
+    required: true
+  changelog:
+    description: Changelog text supplied directly. Cannot be combined with changelog-source other than none.
+    required: false
+    default: ""
+  changelog-source:
+    description: Changelog source. Supported values are none, git-log and file.
+    required: false
+    default: none
+  changelog-since:
+    description: Git ref used as the start of the changelog range when changelog-source is git-log.
+    required: false
+    default: ""
+  changelog-file:
+    description: Keep a Changelog-style file used when changelog-source is file.
+    required: false
+    default: CHANGELOG.md
+  version-visibility:
+    description: Version visibility on the public About page. Supported values are public and private. Empty creates a new version as private and keeps an existing version unchanged.
+    required: false
+    default: ""
+  customer-alias:
+    description: Customer alias for the installation. Must be supplied together with environment.
+    required: false
+    default: ""
+  environment:
+    description: Installation environment, for example production or staging. Must be supplied together with customer-alias.
+    required: false
+    default: ""
+  url:
+    description: URL of the installation.
+    required: false
+    default: ""
+  location:
+    description: Free-text installation location, for example EU-West Frankfurt.
+    required: false
+    default: ""
+  installation-visibility:
+    description: Installation visibility. Supported values are public and private. Empty inherits the previous installation.
+    required: false
+    default: ""
+  is-primary:
+    description: Whether this is the primary installation. Supported values are true and false. Empty inherits the previous installation.
+    required: false
+    default: ""
+  api-base:
+    description: AboutTheApp API base URL.
+    required: false
+    default: https://aboutthe.app/api/v1
+
+outputs:
+  version-id:
+    description: Identifier of the registered product version.
+    value: ${{ steps.version.outputs.id }}
+  installation-id:
+    description: Identifier of the recorded installation, or empty when no installation was requested.
+    value: ${{ steps.installation.outputs.id }}
+
+runs:
+  using: composite
+  steps:
+    - name: Validate release inputs
+      shell: bash
+      env:
+        CUSTOMER_ALIAS: ${{ inputs.customer-alias }}
+        ENVIRONMENT: ${{ inputs.environment }}
+        VERSION_VISIBILITY: ${{ inputs.version-visibility }}
+        URL: ${{ inputs.url }}
+        LOCATION: ${{ inputs.location }}
+        VISIBILITY: ${{ inputs.installation-visibility }}
+        IS_PRIMARY: ${{ inputs.is-primary }}
+      run: bash "$GITHUB_ACTION_PATH/scripts/validate-report.sh"
+
+    - name: Resolve changelog
+      id: changelog
+      shell: bash
+      env:
+        CHANGELOG: ${{ inputs.changelog }}
+        CHANGELOG_SOURCE: ${{ inputs.changelog-source }}
+        CHANGELOG_SINCE: ${{ inputs.changelog-since }}
+        CHANGELOG_FILE: ${{ inputs.changelog-file }}
+        VERSION: ${{ inputs.version }}
+      run: bash "$GITHUB_ACTION_PATH/scripts/resolve-changelog.sh"
+
+    - name: Register version
+      id: version
+      shell: bash
+      env:
+        ALIAS: ${{ inputs.alias }}
+        VERSION: ${{ inputs.version }}
+        TOKEN: ${{ inputs.token }}
+        API_BASE: ${{ inputs.api-base }}
+        CHANGELOG: ${{ steps.changelog.outputs.text }}
+        VISIBILITY: ${{ inputs.version-visibility }}
+      run: bash "$GITHUB_ACTION_PATH/scripts/add-version.sh"
+
+    - name: Record installation
+      id: installation
+      if: ${{ inputs.customer-alias != '' && inputs.environment != '' }}
+      shell: bash
+      env:
+        ALIAS: ${{ inputs.alias }}
+        CUSTOMER_ALIAS: ${{ inputs.customer-alias }}
+        ENVIRONMENT: ${{ inputs.environment }}
+        VERSION: ${{ inputs.version }}
+        TOKEN: ${{ inputs.token }}
+        API_BASE: ${{ inputs.api-base }}
+        URL: ${{ inputs.url }}
+        LOCATION: ${{ inputs.location }}
+        VISIBILITY: ${{ inputs.installation-visibility }}
+        IS_PRIMARY: ${{ inputs.is-primary }}
+      run: bash "$GITHUB_ACTION_PATH/scripts/add-installation.sh"

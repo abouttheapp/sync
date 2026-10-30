@@ -1,0 +1,64 @@
+name: Add installation to AboutTheApp
+description: Record an installation of an existing product version in AboutTheApp.
+author: AboutTheApp
+
+inputs:
+  token:
+    description: AboutTheApp CI/CD token. Store it as a GitHub Actions secret.
+    required: true
+  alias:
+    description: Product alias in AboutTheApp.
+    required: true
+  customer-alias:
+    description: Customer alias in AboutTheApp.
+    required: true
+  environment:
+    description: Installation environment, for example production or staging.
+    required: true
+  version:
+    description: Existing product version to record as installed.
+    required: true
+  url:
+    description: URL of the installation.
+    required: false
+    default: ""
+  location:
+    description: Free-text installation location, for example EU-West Frankfurt.
+    required: false
+    default: ""
+  visibility:
+    description: Installation visibility. Supported values are public and private. Empty inherits the previous installation.
+    required: false
+    default: ""
+  is-primary:
+    description: Whether this is the primary installation. Supported values are true and false. Empty inherits the previous installation.
+    required: false
+    default: ""
+  api-base:
+    description: AboutTheApp API base URL.
+    required: false
+    default: https://aboutthe.app/api/v1
+
+outputs:
+  installation-id:
+    description: Identifier of the recorded installation.
+    value: ${{ steps.installation.outputs.id }}
+
+runs:
+  using: composite
+  steps:
+    - name: Record installation
+      id: installation
+      shell: bash
+      env:
+        ALIAS: ${{ inputs.alias }}
+        CUSTOMER_ALIAS: ${{ inputs.customer-alias }}
+        ENVIRONMENT: ${{ inputs.environment }}
+        VERSION: ${{ inputs.version }}
+        TOKEN: ${{ inputs.token }}
+        API_BASE: ${{ inputs.api-base }}
+        URL: ${{ inputs.url }}
+        LOCATION: ${{ inputs.location }}
+        VISIBILITY: ${{ inputs.visibility }}
+        IS_PRIMARY: ${{ inputs.is-primary }}
+      run: bash "$GITHUB_ACTION_PATH/../scripts/add-installation.sh"

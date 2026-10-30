@@ -1,0 +1,124 @@
+name: Test action
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+
+      - name: Check shell scripts
+        run: |
+          bash -n scripts/*.sh
+          bash -n tests/*.sh
+          shellcheck scripts/*.sh
+          shellcheck tests/*.sh
+
+      - name: Test shared scripts
+        run: bash tests/run-scripts.sh
+
+      - name: Start mock API
+        id: mock
+        env:
+          PORT_FILE: ${{ runner.temp }}/abouttheapp-port
+          REQUEST_LOG: ${{ runner.temp }}/abouttheapp-requests.jsonl
+        run: |
+          node tests/mock-server.mjs &
+          echo "$!" > "${{ runner.temp }}/abouttheapp-mock.pid"
+          for _ in {1..50}; do
+            if [ -s "$PORT_FILE" ]; then break; fi
+            sleep 0.1
+          done
+          test -s "$PORT_FILE"
+          echo "api-base=http://127.0.0.1:$(cat "$PORT_FILE")/api/v1" >> "$GITHUB_OUTPUT"
+
+      - name: Test main action
+        id: report
+        uses: ./
+        with:
+          token: test-token
+          api-base: ${{ steps.mock.outputs.api-base }}
+          alias: example-product
+          version: 1.2.3
+          changelog: |
+            - Added release reporting
+            - Added installation tracking
+          customer-alias: example-customer
+          environment: production
+          url: https://example.test
+          location: EU-West
+          version-visibility: public
+          installation-visibility: private
+          is-primary: true
+
+      - name: Assert main action outputs
+        env:
+          VERSION_ID: ${{ steps.report.outputs.version-id }}
+          INSTALLATION_ID: ${{ steps.report.outputs.installation-id }}
+        run: |
+          test "$VERSION_ID" = "version-1"
+          test "$INSTALLATION_ID" = "installation-1"
+
+      - name: Test version sub-action
+        id: version
+        uses: ./add-version
+        with:
+          token: test-token
+          api-base: ${{ steps.mock.outputs.api-base }}
+          alias: example-product
+          version: 1.2.4
+
+      - name: Test installation sub-action
+        id: installation
+        uses: ./add-installation
+        with:
+          token: test-token
+          api-base: ${{ steps.mock.outputs.api-base }}
+          alias: example-product
+          customer-alias: example-customer
+          environment: staging
+          version: 1.2.4
+          is-primary: false
+
+      - name: Assert sub-action outputs and requests
+        env:
+          VERSION_ID: ${{ steps.version.outputs.version-id }}
+          INSTALLATION_ID: ${{ steps.installation.outputs.installation-id }}
+          REQUEST_LOG: ${{ runner.temp }}/abouttheapp-requests.jsonl
+        run: |
+          test "$VERSION_ID" = "version-1"
+          test "$INSTALLATION_ID" = "installation-1"
+          jq -s -e 'length == 4' "$REQUEST_LOG"
+          jq -s -e '.[0].path == "/api/v1/integrations/versions" and .[0].body.changelog == "- Added release reporting\n- Added installation tracking"' "$REQUEST_LOG"
+          jq -s -e '.[1].path == "/api/v1/integrations/installations" and .[1].body.isPrimary == true and .[1].body.visibility == "private"' "$REQUEST_LOG"
+          jq -s -e '.[3].body.environment == "staging" and .[3].body.isPrimary == false' "$REQUEST_LOG"
+
+      - name: Test input validation
+        env:
+          CUSTOMER_ALIAS: example-customer
+          ENVIRONMENT: ""
+        run: |
+          if bash scripts/validate-report.sh; then
+            echo "Expected incomplete installation inputs to fail." >&2
+            exit 1
+          fi
+          if ALIAS=example-product CUSTOMER_ALIAS=example-customer ENVIRONMENT=production VERSION=1.2.3 \
+            TOKEN=test-token API_BASE="${{ steps.mock.outputs.api-base }}" IS_PRIMARY=invalid \
+            GITHUB_OUTPUT="${{ runner.temp }}/invalid-output" bash scripts/add-installation.sh; then
+            echo "Expected invalid is-primary to fail." >&2
+            exit 1
+          fi
+
+      - name: Stop mock API
+        if: ${{ always() }}
+        run: |
+          if [ -f "${{ runner.temp }}/abouttheapp-mock.pid" ]; then
+            kill "$(cat "${{ runner.temp }}/abouttheapp-mock.pid")" 2>/dev/null || true
+          fi

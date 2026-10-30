@@ -1,0 +1,69 @@
+name: Add version to AboutTheApp
+description: Register or update a product version and its changelog in AboutTheApp.
+author: AboutTheApp
+
+inputs:
+  token:
+    description: AboutTheApp CI/CD token. Store it as a GitHub Actions secret.
+    required: true
+  alias:
+    description: Product alias in AboutTheApp.
+    required: true
+  version:
+    description: Version string to register.
+    required: true
+  changelog:
+    description: Changelog text supplied directly. Cannot be combined with changelog-source other than none.
+    required: false
+    default: ""
+  changelog-source:
+    description: Changelog source. Supported values are none, git-log and file.
+    required: false
+    default: none
+  changelog-since:
+    description: Git ref used as the start of the changelog range when changelog-source is git-log.
+    required: false
+    default: ""
+  changelog-file:
+    description: Keep a Changelog-style file used when changelog-source is file.
+    required: false
+    default: CHANGELOG.md
+  visibility:
+    description: Version visibility on the public About page. Supported values are public and private. Empty creates a new version as private and keeps an existing version unchanged.
+    required: false
+    default: ""
+  api-base:
+    description: AboutTheApp API base URL.
+    required: false
+    default: https://aboutthe.app/api/v1
+
+outputs:
+  version-id:
+    description: Identifier of the registered product version.
+    value: ${{ steps.version.outputs.id }}
+
+runs:
+  using: composite
+  steps:
+    - name: Resolve changelog
+      id: changelog
+      shell: bash
+      env:
+        CHANGELOG: ${{ inputs.changelog }}
+        CHANGELOG_SOURCE: ${{ inputs.changelog-source }}
+        CHANGELOG_SINCE: ${{ inputs.changelog-since }}
+        CHANGELOG_FILE: ${{ inputs.changelog-file }}
+        VERSION: ${{ inputs.version }}
+      run: bash "$GITHUB_ACTION_PATH/../scripts/resolve-changelog.sh"
+
+    - name: Register version
+      id: version
+      shell: bash
+      env:
+        ALIAS: ${{ inputs.alias }}
+        VERSION: ${{ inputs.version }}
+        TOKEN: ${{ inputs.token }}
+        API_BASE: ${{ inputs.api-base }}
+        CHANGELOG: ${{ steps.changelog.outputs.text }}
+        VISIBILITY: ${{ inputs.visibility }}
+      run: bash "$GITHUB_ACTION_PATH/../scripts/add-version.sh"
