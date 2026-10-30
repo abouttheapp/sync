@@ -33,6 +33,7 @@ VERSION=1.2.3 \
 TOKEN=test-token \
 API_BASE="$api_base" \
 CHANGELOG='- Added script test' \
+VISIBILITY=public \
 GITHUB_OUTPUT="$version_output" \
   bash "$ROOT_DIR/scripts/add-version.sh"
 grep -Fxq 'id=version-1' "$version_output"

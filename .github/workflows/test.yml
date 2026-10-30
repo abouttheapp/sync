@@ -96,7 +96,7 @@ jobs:
           test "$VERSION_ID" = "version-1"
           test "$INSTALLATION_ID" = "installation-1"
           jq -s -e 'length == 4' "$REQUEST_LOG"
-          jq -s -e '.[0].path == "/api/v1/integrations/versions" and .[0].body.changelog == "- Added release reporting\n- Added installation tracking"' "$REQUEST_LOG"
+          jq -s -e '.[0].path == "/api/v1/integrations/versions" and .[0].body.changelog == "- Added release reporting\n- Added installation tracking" and .[0].body.visibility == "public"' "$REQUEST_LOG"
           jq -s -e '.[1].path == "/api/v1/integrations/installations" and .[1].body.isPrimary == true and .[1].body.visibility == "private"' "$REQUEST_LOG"
           jq -s -e '.[3].body.environment == "staging" and .[3].body.isPrimary == false' "$REQUEST_LOG"
 

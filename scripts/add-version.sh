@@ -29,8 +29,10 @@ body=$(jq -n \
   --arg alias "$alias_name" \
   --arg version "$version" \
   --arg changelog "$changelog" \
+  --arg visibility "$visibility" \
   '{alias: $alias, version: $version}
-   + (if ($changelog | length) > 0 then {changelog: $changelog} else {} end)')
+   + (if ($changelog | length) > 0 then {changelog: $changelog} else {} end)
+   + (if ($visibility | length) > 0 then {visibility: $visibility} else {} end)')
 
 response=$(post_json "${api_base%/}/integrations/versions" "$body" "$token")
 id=$(printf '%s' "$response" | jq -er '.id | strings | select(length > 0)') || fail "Version response does not contain a valid 'id'."
