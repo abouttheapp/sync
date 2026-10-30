@@ -8,7 +8,7 @@ The main action always registers the product version. When `customer-alias` and 
 
 ## Quick start
 
-Create a CI/CD token in your AboutTheApp workspace settings and store it in the consuming repository as the `ABOUTTHEAPP_TOKEN` GitHub Actions secret.
+Create a CI/CD token in the AboutTheApp dashboard (user menu → Account → CI/CD) and store it in the consuming repository as the `ABOUTTHEAPP_TOKEN` GitHub Actions secret.
 
 ```yaml
 name: Report release
@@ -54,6 +54,33 @@ jobs:
 ```
 
 A GitHub Release is not required. The example runs directly from a pushed Git tag.
+
+## Set up with an AI agent
+
+Paste this prompt into your coding agent (Claude Code, Codex, Cursor, Copilot) in the repository of your app and fill in the alias lines:
+
+```text
+Add the AboutTheApp GitHub Action to the deployment workflow of this repository.
+Product alias: <alias>
+Customer alias: <customer-alias>
+Environment: production
+
+Documentation: https://github.com/abouttheapp/sync#readme
+
+1. Find the workflow that deploys this app. Add abouttheapp/sync@v1 as a step that runs after a successful deployment. Do not add it to test or pull request workflows. If no workflow deploys the app, stop and ask me.
+2. Use the version the workflow already works with (Git tag, package.json, build number). Do not introduce a new versioning scheme.
+3. Use changelog-source: git-log with changelog-since set to the previous release tag and make sure the checkout has fetch-depth: 0. If the repository has no release tags, use changelog-source: none.
+4. Pass the token as ${{ secrets.ABOUTTHEAPP_TOKEN }}. Never write a token into a file. Tell me to add the secret, do not add it yourself.
+5. If the workflow deploys to several environments, add one step per environment.
+6. Change nothing else in the workflow and do not commit. When done, list what I have to check before the first run.
+```
+
+Things to know before the first run, for you and your agent:
+
+- **The product and the customer must already exist in AboutTheApp.** The customer needs an alias. The action never creates them; a missing one fails with HTTP 404. Versions are different: the main action registers the version first, so only the separate `add-installation` action needs it to exist.
+- **One token per account.** It is shown only once and works for all products in the account. Generating a new one invalidates the previous one, so reuse it across repositories, for example as an organization secret.
+- **Report only real deployments.** Every run with `customer-alias` and `environment` records a new installation event, and that includes reruns.
+- **New versions are private by default.** Add `version-visibility: public` to show them on the public About page.
 
 ## What the action records
 
