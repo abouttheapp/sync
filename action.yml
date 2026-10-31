@@ -1,5 +1,5 @@
 name: Report release to AboutTheApp
-description: Register a product version and optionally record its installation in AboutTheApp.
+description: Record app versions, release notes and deployments in AboutTheApp from your release workflow.
 author: AboutTheApp
 
 branding:
@@ -70,7 +70,7 @@ outputs:
     description: Identifier of the registered product version.
     value: ${{ steps.version.outputs.id }}
   installation-id:
-    description: Identifier of the recorded installation, or empty when no installation was requested.
+    description: Identifier of the recorded installation; empty when no installation was requested.
     value: ${{ steps.installation.outputs.id }}
 
 runs:

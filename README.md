@@ -1,14 +1,20 @@
 # AboutTheApp GitHub Action
 
-Report product versions, changelogs and customer installations from GitHub Actions to [AboutTheApp](https://aboutthe.app).
+Record app versions, release notes and deployments in [AboutTheApp](https://aboutthe.app) from your release workflow.
 
-AboutTheApp keeps every link and resource of an app in one place: repositories, documentation, environments, support and third-party services. Your app can show them through a hosted About page, an embeddable About box or an API. This action keeps the version history and the record of what runs where up to date from your release workflow. See [AboutTheApp's own About page](https://aboutthe.app/aboutthe.app) for a live example.
+AboutTheApp keeps every link and resource of an app in one place: repositories, documentation, environments, support and third-party services. Your app can show them through a hosted About page, an embeddable About box or an API. This action keeps the version history and the record of what runs where up to date, so nobody has to maintain them by hand.
 
-The main action always registers the product version. When `customer-alias` and `environment` are supplied, it also records an installation of that version. This lets a release workflow report the version after its artifacts have been uploaded, before a separate start or restart step.
+![Version history with release notes on an AboutTheApp About page](https://raw.githubusercontent.com/abouttheapp/sync/main/docs/about-page-history.png)
+
+See the [live version history](https://aboutthe.app/aboutthe.app?tab=history) that this action writes for AboutTheApp itself.
+
+You need an AboutTheApp account. The [Free plan](https://aboutthe.app/en/pricing) covers one app and includes this action.
+
+The main action always registers the product version. When `customer-alias` and `environment` are supplied, it also records an installation of that version.
 
 ## Quick start
 
-Create a CI/CD token in the AboutTheApp dashboard (user menu → Account → CI/CD) and store it in the consuming repository as the `ABOUTTHEAPP_TOKEN` GitHub Actions secret.
+Create a CI/CD token in the AboutTheApp dashboard (user menu → Account → CI/CD; only the account owner can do this) and store it in the consuming repository as the `ABOUTTHEAPP_TOKEN` GitHub Actions secret.
 
 ```yaml
 name: Report release
@@ -37,7 +43,7 @@ jobs:
           previous_tag=$(git describe --tags --match 'v*' --abbrev=0 HEAD^ 2>/dev/null || true)
           echo "previous-tag=$previous_tag" >> "$GITHUB_OUTPUT"
 
-      # Put this step after the release artifacts have been uploaded to the target environment.
+      # Put this step after the steps that deploy your app, so only successful deployments are reported.
       - name: Report release to AboutTheApp
         uses: abouttheapp/sync@v1
         with:
@@ -77,9 +83,9 @@ Documentation: https://github.com/abouttheapp/sync#readme
 
 Things to know before the first run, for you and your agent:
 
-- **The product and the customer must already exist in AboutTheApp.** The customer needs an alias. The action never creates them; a missing one fails with HTTP 404. Versions are different: the main action registers the version first, so only the separate `add-installation` action needs it to exist.
+- **The product and the customer must already exist in AboutTheApp.** The customer needs an alias. The action never creates them; a missing one fails with HTTP 404. The main action registers the version itself; only the separate `add-installation` action needs the version to exist.
 - **One token per account.** It is shown only once and works for all products in the account. Generating a new one invalidates the previous one, so reuse it across repositories, for example as an organization secret.
-- **Report only real deployments.** Every run with `customer-alias` and `environment` records a new installation event, and that includes reruns.
+- **Report only real deployments.** Every run with `customer-alias` and `environment` records a new installation event, including reruns.
 - **New versions are private by default.** Add `version-visibility: public` to show them on the public About page.
 
 ## What the action records
@@ -89,7 +95,7 @@ The main action performs these operations in order:
 1. Upsert the version and its changelog for the product identified by `alias`.
 2. If both `customer-alias` and `environment` are present, append an installation event for that version.
 
-New versions are private unless you set `version-visibility: public`, which shows them on the public About page. Version upserts are idempotent for the same product and version. Installations are intentionally append-only: rerunning a workflow with installation inputs records another installation event.
+Version upserts are idempotent for the same product and version. Installations are intentionally append-only: rerunning a workflow with installation inputs records another installation event.
 
 ## Changelog sources
 
@@ -154,11 +160,11 @@ Installation-specific options are rejected unless both `customer-alias` and `env
 | Output | Description |
 | --- | --- |
 | `version-id` | Identifier of the registered version. |
-| `installation-id` | Identifier of the installation, or empty when no installation was requested. |
+| `installation-id` | Identifier of the installation; empty when no installation was requested. |
 
 ## Individual operations
 
-The two API operations are also available separately.
+The two API operations are also available separately. Their inputs match the main action, except that the visibility input is named `visibility` in both.
 
 ### Register only a version
 
@@ -196,6 +202,10 @@ The action does not use `GITHUB_TOKEN` and does not require write access to the 
 Use `@v1` to receive backwards-compatible fixes and improvements. Pin to a full release such as `@v1.0.0` or a commit SHA when your security policy requires an immutable reference.
 
 Breaking input or behavior changes will be released under a new major version.
+
+## Support
+
+Report bugs in [GitHub Issues](https://github.com/abouttheapp/sync/issues). For questions about your account, use [AboutTheApp support](https://aboutthe.app/en/support).
 
 ## License
 
