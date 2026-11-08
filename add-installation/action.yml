@@ -34,6 +34,22 @@ inputs:
     description: Whether this is the primary installation. Supported values are true and false. Empty inherits the previous installation.
     required: false
     default: ""
+  verify-url:
+    description: URL where the deployed app reports its version. When set, the action waits until the app reports the version and records nothing if it does not.
+    required: false
+    default: ""
+  verify-field:
+    description: jq path to the version in a JSON response from verify-url. A non-JSON response is compared by its first line.
+    required: false
+    default: .version
+  verify-timeout:
+    description: Seconds to wait for verify-url to report the version.
+    required: false
+    default: "300"
+  verify-interval:
+    description: Seconds between checks of verify-url.
+    required: false
+    default: "10"
   api-base:
     description: AboutTheApp API base URL.
     required: false
@@ -47,6 +63,17 @@ outputs:
 runs:
   using: composite
   steps:
+    - name: Verify deployed version
+      if: ${{ inputs.verify-url != '' }}
+      shell: bash
+      env:
+        VERIFY_URL: ${{ inputs.verify-url }}
+        VERIFY_FIELD: ${{ inputs.verify-field }}
+        VERIFY_TIMEOUT: ${{ inputs.verify-timeout }}
+        VERIFY_INTERVAL: ${{ inputs.verify-interval }}
+        VERSION: ${{ inputs.version }}
+      run: bash "$GITHUB_ACTION_PATH/../scripts/verify-deployment.sh"
+
     - name: Record installation
       id: installation
       shell: bash

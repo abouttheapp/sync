@@ -25,6 +25,7 @@ for _ in {1..50}; do
   sleep 0.1
 done
 test -s "$PORT_FILE"
+app_base="http://127.0.0.1:$(<"$PORT_FILE")/app"
 api_base="http://127.0.0.1:$(<"$PORT_FILE")/api/v1"
 
 version_output="$TEMP_DIR/version-output"
@@ -56,6 +57,43 @@ grep -Fxq 'id=installation-1' "$installation_output"
 jq -s -e 'length == 2' "$REQUEST_LOG" >/dev/null
 jq -s -e '.[0].body.version == "1.2.3" and .[0].body.changelog == "- Added script test" and .[0].body.visibility == "public"' "$REQUEST_LOG" >/dev/null
 jq -s -e '.[1].body.environment == "production" and .[1].body.isPrimary == true' "$REQUEST_LOG" >/dev/null
+
+sbom_file="$TEMP_DIR/sbom.cdx.json"
+printf '%s' '{"bomFormat":"CycloneDX","specVersion":"1.6","components":[]}' > "$sbom_file"
+sbom_output="$TEMP_DIR/sbom-output"
+ALIAS=example-product \
+VERSION=1.2.3 \
+TOKEN=test-token \
+API_BASE="$api_base" \
+SBOM_FILE="$sbom_file" \
+SBOM_PART=backend \
+GITHUB_OUTPUT="$sbom_output" \
+  bash "$ROOT_DIR/scripts/add-sbom.sh"
+grep -Fxq 'id=sbom-1' "$sbom_output"
+jq -s -e '.[2].path == "/api/v1/integrations/sboms" and .[2].body.alias == "example-product" and .[2].body.version == "1.2.3" and .[2].body.part == "backend" and .[2].body.gzip == true' "$REQUEST_LOG" >/dev/null
+
+# Values that curl --form would read as a file (@...) or as part options (;type=) must arrive literally.
+ALIAS=example-product \
+VERSION='@missing-file' \
+TOKEN=test-token \
+API_BASE="$api_base" \
+SBOM_FILE="$sbom_file" \
+SBOM_PART='ios;type=text/plain' \
+GITHUB_OUTPUT="$sbom_output" \
+  bash "$ROOT_DIR/scripts/add-sbom.sh"
+jq -s -e '.[3].body.version == "@missing-file" and .[3].body.part == "ios;type=text/plain" and .[3].body.gzip == true' "$REQUEST_LOG" >/dev/null
+
+printf '%s' '{"spdxVersion":"SPDX-2.3"}' > "$TEMP_DIR/spdx.json"
+if ALIAS=example-product VERSION=1.2.3 TOKEN=test-token API_BASE="$api_base" SBOM_FILE="$TEMP_DIR/spdx.json" \
+  GITHUB_OUTPUT="$TEMP_DIR/invalid-output" bash "$ROOT_DIR/scripts/add-sbom.sh"; then
+  echo 'Expected a non-CycloneDX SBOM to fail.' >&2
+  exit 1
+fi
+
+if SBOM_PART=backend bash "$ROOT_DIR/scripts/validate-report.sh"; then
+  echo 'Expected sbom-part without sbom-file to fail.' >&2
+  exit 1
+fi
 
 changelog_file="$TEMP_DIR/CHANGELOG.md"
 printf '%s\n' \
@@ -92,5 +130,38 @@ if ALIAS=example-product CUSTOMER_ALIAS=example-customer ENVIRONMENT=production 
   echo 'Expected invalid is-primary to fail.' >&2
   exit 1
 fi
+
+VERIFY_URL="$app_base/version.json" VERIFY_FIELD=.app.version VERSION=1.2.3 VERIFY_TIMEOUT=0 \
+  bash "$ROOT_DIR/scripts/verify-deployment.sh"
+VERIFY_URL="$app_base/version.txt" VERSION=1.2.3 VERIFY_TIMEOUT=0 \
+  bash "$ROOT_DIR/scripts/verify-deployment.sh"
+VERIFY_URL="$app_base/rollout.json" VERSION=1.2.3 VERIFY_TIMEOUT=10 VERIFY_INTERVAL=1 \
+  bash "$ROOT_DIR/scripts/verify-deployment.sh"
+
+if VERIFY_URL="$app_base/version.json" VERSION=1.2.3 VERIFY_TIMEOUT=0 \
+  bash "$ROOT_DIR/scripts/verify-deployment.sh"; then
+  echo 'Expected a missing version field to fail.' >&2
+  exit 1
+fi
+
+if VERIFY_URL="$app_base/version.txt" VERSION=1.2.4 VERIFY_TIMEOUT=1 VERIFY_INTERVAL=1 \
+  bash "$ROOT_DIR/scripts/verify-deployment.sh"; then
+  echo 'Expected a different deployed version to fail.' >&2
+  exit 1
+fi
+
+if VERIFY_URL="$app_base/missing" VERSION=1.2.3 VERIFY_TIMEOUT=0 \
+  bash "$ROOT_DIR/scripts/verify-deployment.sh"; then
+  echo 'Expected an unreachable verify-url to fail.' >&2
+  exit 1
+fi
+
+if VERIFY_URL="$app_base/version.json" ENVIRONMENT='' CUSTOMER_ALIAS='' \
+  bash "$ROOT_DIR/scripts/validate-report.sh"; then
+  echo 'Expected verify-url without an installation to fail.' >&2
+  exit 1
+fi
+
+jq -s -e 'length == 4' "$REQUEST_LOG" >/dev/null
 
 echo 'Shared script integration tests passed.'

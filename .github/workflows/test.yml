@@ -38,6 +38,10 @@ jobs:
           done
           test -s "$PORT_FILE"
           echo "api-base=http://127.0.0.1:$(cat "$PORT_FILE")/api/v1" >> "$GITHUB_OUTPUT"
+          echo "app-base=http://127.0.0.1:$(cat "$PORT_FILE")/app" >> "$GITHUB_OUTPUT"
+
+      - name: Create test SBOM
+        run: printf '%s' '{"bomFormat":"CycloneDX","specVersion":"1.6","components":[]}' > "${{ runner.temp }}/sbom.cdx.json"
 
       - name: Test main action
         id: report
@@ -57,14 +61,21 @@ jobs:
           version-visibility: public
           installation-visibility: private
           is-primary: true
+          verify-url: ${{ steps.mock.outputs.app-base }}/version.json
+          verify-field: .app.version
+          verify-timeout: "0"
+          sbom-file: ${{ runner.temp }}/sbom.cdx.json
+          sbom-part: backend
 
       - name: Assert main action outputs
         env:
           VERSION_ID: ${{ steps.report.outputs.version-id }}
           INSTALLATION_ID: ${{ steps.report.outputs.installation-id }}
+          SBOM_ID: ${{ steps.report.outputs.sbom-id }}
         run: |
           test "$VERSION_ID" = "version-1"
           test "$INSTALLATION_ID" = "installation-1"
+          test "$SBOM_ID" = "sbom-1"
 
       - name: Test version sub-action
         id: version
@@ -87,18 +98,35 @@ jobs:
           version: 1.2.4
           is-primary: false
 
+      - name: Test failed deployment verification
+        id: unverified
+        continue-on-error: true
+        uses: ./add-installation
+        with:
+          token: test-token
+          api-base: ${{ steps.mock.outputs.api-base }}
+          alias: example-product
+          customer-alias: example-customer
+          environment: staging
+          version: 1.2.4
+          verify-url: ${{ steps.mock.outputs.app-base }}/version.txt
+          verify-timeout: "0"
+
       - name: Assert sub-action outputs and requests
         env:
           VERSION_ID: ${{ steps.version.outputs.version-id }}
           INSTALLATION_ID: ${{ steps.installation.outputs.installation-id }}
           REQUEST_LOG: ${{ runner.temp }}/abouttheapp-requests.jsonl
+          VERIFICATION_OUTCOME: ${{ steps.unverified.outcome }}
         run: |
           test "$VERSION_ID" = "version-1"
           test "$INSTALLATION_ID" = "installation-1"
-          jq -s -e 'length == 4' "$REQUEST_LOG"
+          test "$VERIFICATION_OUTCOME" = "failure"
+          jq -s -e 'length == 5' "$REQUEST_LOG"
           jq -s -e '.[0].path == "/api/v1/integrations/versions" and .[0].body.changelog == "- Added release reporting\n- Added installation tracking" and .[0].body.visibility == "public"' "$REQUEST_LOG"
           jq -s -e '.[1].path == "/api/v1/integrations/installations" and .[1].body.isPrimary == true and .[1].body.visibility == "private"' "$REQUEST_LOG"
-          jq -s -e '.[3].body.environment == "staging" and .[3].body.isPrimary == false' "$REQUEST_LOG"
+          jq -s -e '.[2].path == "/api/v1/integrations/sboms" and .[2].body.version == "1.2.3" and .[2].body.part == "backend" and .[2].body.gzip == true' "$REQUEST_LOG"
+          jq -s -e '.[4].body.environment == "staging" and .[4].body.isPrimary == false' "$REQUEST_LOG"
 
       - name: Test input validation
         env:

@@ -85,17 +85,62 @@ Things to know before the first run, for you and your agent:
 
 - **The product and the customer must already exist in AboutTheApp.** The customer needs an alias. The action never creates them; a missing one fails with HTTP 404. The main action registers the version itself; only the separate `add-installation` action needs the version to exist.
 - **One token per account.** It is shown only once and works for all products in the account. Generating a new one invalidates the previous one, so reuse it across repositories, for example as an organization secret.
-- **Report only real deployments.** Every run with `customer-alias` and `environment` records a new installation event, including reruns.
+- **Report only real deployments.** Every run with `customer-alias` and `environment` records a new installation event, including reruns. Add `verify-url` to record the installation only after the deployed app reports the new version, see [Verify the deployment](#verify-the-deployment).
 - **New versions are private by default.** Add `version-visibility: public` to show them on the public About page.
 
 ## What the action records
 
 The main action performs these operations in order:
 
-1. Upsert the version and its changelog for the product identified by `alias`.
-2. If both `customer-alias` and `environment` are present, append an installation event for that version.
+1. If `verify-url` is present, wait until the deployed app reports the version.
+2. Upsert the version and its changelog for the product identified by `alias`.
+3. If both `customer-alias` and `environment` are present, append an installation event for that version.
+4. If `sbom-file` is present, attach the SBOM to that version.
 
-Version upserts are idempotent for the same product and version. Installations are intentionally append-only: rerunning a workflow with installation inputs records another installation event.
+Version upserts are idempotent for the same product and version. Installations are intentionally append-only: rerunning a workflow with installation inputs records another installation event. The SBOM is uploaded last, so a rejected SBOM fails the step without preventing the version and the installation from being recorded.
+
+## Attach an SBOM
+
+With `sbom-file`, the action uploads a CycloneDX JSON SBOM (versions 1.4 to 1.7) to the version, so your team keeps the SBOM of every release in AboutTheApp. Generate the file in an earlier step with any CycloneDX tool, for example cdxgen, syft or Trivy:
+
+```yaml
+- name: Install dependencies
+  run: npm ci
+
+- name: Generate SBOM
+  run: npx --yes @cyclonedx/cyclonedx-npm --output-file sbom.cdx.json
+
+- uses: abouttheapp/sync@v1
+  with:
+    token: ${{ secrets.ABOUTTHEAPP_TOKEN }}
+    alias: my-app
+    version: ${{ github.ref_name }}
+    sbom-file: sbom.cdx.json
+    sbom-part: web
+```
+
+`@cyclonedx/cyclonedx-npm` reads the installed `node_modules`, so install the dependencies first. The file is compressed before the upload and may contain up to 10 MB of JSON. `sbom-part` names the part of the app the SBOM describes, for example `backend`, `web` or `ios`. Leave it empty for the whole app. A new SBOM of the same version and part replaces the previous one, which stays in the history. SBOMs are visible only to members of your workspace.
+
+## Verify the deployment
+
+With `verify-url`, the action checks the running app before it records anything. It requests the URL until the response reports the version being released, then records the version and the installation. If the app still reports another version or is unreachable when `verify-timeout` runs out, the step fails and nothing is recorded.
+
+```yaml
+with:
+  customer-alias: acme
+  environment: production
+  version: 1.2.3
+  verify-url: https://app.example.com/version.json
+```
+
+The URL must be reachable from the runner and answer with HTTP 2xx without authentication. Two response formats are supported:
+
+- JSON such as `{"version": "1.2.3"}`. Use `verify-field` for another location, for example `.build.version`.
+- Plain text whose first line is the version, for example `1.2.3`.
+
+The reported value must match `version` exactly. Requests send `Cache-Control: no-cache` and follow redirects. Make sure a CDN does not serve the old response for longer than `verify-timeout`.
+
+`verify-url` requires `customer-alias` and `environment` and is also available in the `add-installation` action.
 
 ## Changelog sources
 
@@ -151,6 +196,12 @@ Direct `changelog` text cannot be combined with `changelog-source: git-log` or `
 | `location` | no | empty | Free-text installation location. |
 | `installation-visibility` | no | empty | `public` or `private`; empty inherits the previous installation. |
 | `is-primary` | no | empty | `true` or `false`; empty inherits the previous installation. |
+| `verify-url` | no | empty | URL where the deployed app reports its version. Requires `customer-alias` and `environment`. |
+| `verify-field` | no | `.version` | jq path to the version in a JSON response. |
+| `verify-timeout` | no | `300` | Seconds to wait until `verify-url` reports the version. |
+| `verify-interval` | no | `10` | Seconds between checks of `verify-url`. |
+| `sbom-file` | no | empty | Path to a CycloneDX JSON SBOM, optionally gzip compressed. |
+| `sbom-part` | no | empty | App part the SBOM describes, for example `backend` or `ios`. Requires `sbom-file`. |
 | `api-base` | no | `https://aboutthe.app/api/v1` | API base URL, primarily for testing. |
 
 Installation-specific options are rejected unless both `customer-alias` and `environment` are present.
@@ -161,10 +212,11 @@ Installation-specific options are rejected unless both `customer-alias` and `env
 | --- | --- |
 | `version-id` | Identifier of the registered version. |
 | `installation-id` | Identifier of the installation; empty when no installation was requested. |
+| `sbom-id` | Identifier of the uploaded SBOM; empty when no `sbom-file` was given. |
 
 ## Individual operations
 
-The two API operations are also available separately. Their inputs match the main action, except that the visibility input is named `visibility` in both.
+Registering a version and recording an installation are also available separately. Their inputs match the main action, except that the visibility input is named `visibility` in both. Uploading an SBOM is part of the main action only.
 
 ### Register only a version
 
@@ -193,7 +245,7 @@ The version must already exist in AboutTheApp.
 
 ## Runner requirements
 
-Version 1 is a composite action designed for GitHub-hosted Ubuntu runners. It uses Bash, `curl`, `jq`, Git and `awk`. Git and `awk` are only needed by the corresponding changelog sources.
+Version 1 is a composite action designed for GitHub-hosted Ubuntu runners. It uses Bash, `curl`, `jq`, Git, `awk` and `gzip`. Git and `awk` are only needed by the corresponding changelog sources, `gzip` only by `sbom-file`.
 
 The action does not use `GITHUB_TOKEN` and does not require write access to the consuming repository. The AboutTheApp token is sent only in the HTTPS `Authorization` header and is masked in workflow logs.
 

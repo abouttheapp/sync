@@ -12,12 +12,23 @@ location=${LOCATION:-}
 visibility=${VISIBILITY:-}
 is_primary=${IS_PRIMARY:-}
 version_visibility=${VERSION_VISIBILITY:-}
+verify_url=${VERIFY_URL:-}
+sbom_file=${SBOM_FILE:-}
+sbom_part=${SBOM_PART:-}
+
+if [ -z "$sbom_file" ] && [ -n "$sbom_part" ]; then
+  fail "Input 'sbom-part' requires 'sbom-file'."
+fi
+
+if [ -n "$sbom_file" ] && [ ! -f "$sbom_file" ]; then
+  fail "SBOM file '$sbom_file' does not exist. Generate it in an earlier step."
+fi
 
 if { [ -n "$customer_alias" ] && [ -z "$environment" ]; } || { [ -z "$customer_alias" ] && [ -n "$environment" ]; }; then
   fail "Inputs 'customer-alias' and 'environment' must either both be supplied or both be empty."
 fi
 
-if [ -z "$customer_alias" ] && { [ -n "$url" ] || [ -n "$location" ] || [ -n "$visibility" ] || [ -n "$is_primary" ]; }; then
+if [ -z "$customer_alias" ] && { [ -n "$url" ] || [ -n "$location" ] || [ -n "$visibility" ] || [ -n "$is_primary" ] || [ -n "$verify_url" ]; }; then
   fail "Installation options require both 'customer-alias' and 'environment'."
 fi
 
