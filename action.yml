@@ -84,6 +84,30 @@ inputs:
     description: App part the SBOM describes, for example backend, web or ios. Empty means the whole app. A new SBOM of the same part replaces the previous one.
     required: false
     default: ""
+  sync-components:
+    description: Whether to record the direct dependencies from sbom-file as product components. Supported values are true and false. New components are added, existing ones get the new version and license, none are removed. The SBOM needs a dependency graph of its root component.
+    required: false
+    default: "false"
+  dependencies-file:
+    description: Project file whose direct dependencies are recorded as product components, for example package.json, a .csproj, requirements.txt, pyproject.toml, Cargo.toml, go.mod, pubspec.yaml, Podfile, Package.resolved, pom.xml or build.gradle. Licenses are looked up in the package registry. New components are added, existing ones get the new version and license, none are removed.
+    required: false
+    default: ""
+  dependencies-lockfile:
+    description: Optional file with exact versions for dependencies-file, for example package-lock.json, packages.lock.json, poetry.lock, uv.lock, composer.lock, Cargo.lock, pubspec.lock or gradle.lockfile.
+    required: false
+    default: ""
+  dependencies-ecosystem:
+    description: Ecosystem of dependencies-file. Supported values are npm, nuget, python, composer, cargo, go, pub, cocoapods, swift and maven. Empty detects it from the file name.
+    required: false
+    default: ""
+  dependencies-include-dev:
+    description: Whether dependencies-file also records development dependencies. Supported values are true and false.
+    required: false
+    default: "false"
+  components-visibility:
+    description: Visibility of components added by sync-components or dependencies-file. Supported values are public and private. Empty adds them as private. Existing components keep their visibility.
+    required: false
+    default: ""
   api-base:
     description: AboutTheApp API base URL.
     required: false
@@ -99,6 +123,12 @@ outputs:
   sbom-id:
     description: Identifier of the uploaded SBOM; empty when no sbom-file was given.
     value: ${{ steps.sbom.outputs.id }}
+  components-created:
+    description: Number of product components added by sync-components or dependencies-file; empty without them.
+    value: ${{ steps.components.outputs.components-created || steps.sbom.outputs.components-created }}
+  components-updated:
+    description: Number of product components whose version or license sync-components or dependencies-file changed; empty without them.
+    value: ${{ steps.components.outputs.components-updated || steps.sbom.outputs.components-updated }}
 
 runs:
   using: composite
@@ -116,6 +146,12 @@ runs:
         VERIFY_URL: ${{ inputs.verify-url }}
         SBOM_FILE: ${{ inputs.sbom-file }}
         SBOM_PART: ${{ inputs.sbom-part }}
+        SYNC_COMPONENTS: ${{ inputs.sync-components }}
+        COMPONENTS_VISIBILITY: ${{ inputs.components-visibility }}
+        DEPENDENCIES_FILE: ${{ inputs.dependencies-file }}
+        DEPENDENCIES_LOCKFILE: ${{ inputs.dependencies-lockfile }}
+        DEPENDENCIES_ECOSYSTEM: ${{ inputs.dependencies-ecosystem }}
+        DEPENDENCIES_INCLUDE_DEV: ${{ inputs.dependencies-include-dev }}
       run: bash "$GITHUB_ACTION_PATH/scripts/validate-report.sh"
 
     - name: Verify deployed version
@@ -181,4 +217,21 @@ runs:
         API_BASE: ${{ inputs.api-base }}
         SBOM_FILE: ${{ inputs.sbom-file }}
         SBOM_PART: ${{ inputs.sbom-part }}
+        SYNC_COMPONENTS: ${{ inputs.sync-components }}
+        COMPONENTS_VISIBILITY: ${{ inputs.components-visibility }}
       run: bash "$GITHUB_ACTION_PATH/scripts/add-sbom.sh"
+
+    - name: Update components from the project file
+      id: components
+      if: ${{ inputs.dependencies-file != '' }}
+      shell: bash
+      env:
+        ALIAS: ${{ inputs.alias }}
+        TOKEN: ${{ inputs.token }}
+        API_BASE: ${{ inputs.api-base }}
+        DEPENDENCIES_FILE: ${{ inputs.dependencies-file }}
+        DEPENDENCIES_LOCKFILE: ${{ inputs.dependencies-lockfile }}
+        DEPENDENCIES_ECOSYSTEM: ${{ inputs.dependencies-ecosystem }}
+        DEPENDENCIES_INCLUDE_DEV: ${{ inputs.dependencies-include-dev }}
+        COMPONENTS_VISIBILITY: ${{ inputs.components-visibility }}
+      run: bash "$GITHUB_ACTION_PATH/scripts/sync-components.sh"

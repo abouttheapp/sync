@@ -52,10 +52,35 @@ const server = createServer((request, response) => {
       const field = (name) => text.match(new RegExp(`name="${name}"\\r\\n\\r\\n([^\\r]*)\\r\\n`))?.[1] ?? null;
       const fileStart = text.indexOf('\r\n\r\n', text.indexOf('name="file"')) + 4;
       const gzip = raw[fileStart] === 0x1f && raw[fileStart + 1] === 0x8b;
-      const body = { alias: field('alias'), version: field('version'), part: field('part'), gzip };
+      const body = {
+        alias: field('alias'),
+        version: field('version'),
+        part: field('part'),
+        syncComponents: field('syncComponents'),
+        componentsVisibility: field('componentsVisibility'),
+        gzip
+      };
+      appendFileSync(requestLog, `${JSON.stringify({ path: request.url, body })}\n`);
+      const components = body.syncComponents === 'true' ? { components: { created: 3, updated: 1, unchanged: 5 } } : {};
+      response.writeHead(201, { 'Content-Type': 'application/json' });
+      response.end(JSON.stringify({ id: 'sbom-1', componentCount: 2, ...components }));
+      return;
+    }
+
+    if (request.url === '/api/v1/integrations/components/resolve') {
+      const text = Buffer.concat(chunks).toString('utf8');
+      const field = (name) => text.match(new RegExp(`name="${name}"(?:; filename="[^"]*")?\\r\\n(?:Content-Type: [^\\r]*\\r\\n)?\\r\\n([^\\r]*)\\r\\n`))?.[1] ?? null;
+      const body = {
+        alias: field('alias'),
+        ecosystem: field('ecosystem'),
+        includeDev: field('includeDev'),
+        visibility: field('visibility'),
+        manifest: field('manifest'),
+        lockfile: field('lockfile')
+      };
       appendFileSync(requestLog, `${JSON.stringify({ path: request.url, body })}\n`);
       response.writeHead(201, { 'Content-Type': 'application/json' });
-      response.end(JSON.stringify({ id: 'sbom-1', componentCount: 2 }));
+      response.end(JSON.stringify({ created: 2, updated: 0, unchanged: 1, dependencies: 3 }));
       return;
     }
 

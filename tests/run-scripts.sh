@@ -83,6 +83,58 @@ GITHUB_OUTPUT="$sbom_output" \
   bash "$ROOT_DIR/scripts/add-sbom.sh"
 jq -s -e '.[3].body.version == "@missing-file" and .[3].body.part == "ios;type=text/plain" and .[3].body.gzip == true' "$REQUEST_LOG" >/dev/null
 
+sync_output="$TEMP_DIR/sync-output"
+ALIAS=example-product \
+VERSION=1.2.3 \
+TOKEN=test-token \
+API_BASE="$api_base" \
+SBOM_FILE="$sbom_file" \
+SYNC_COMPONENTS=true \
+COMPONENTS_VISIBILITY=public \
+GITHUB_OUTPUT="$sync_output" \
+  bash "$ROOT_DIR/scripts/add-sbom.sh"
+grep -Fxq 'components-created=3' "$sync_output"
+grep -Fxq 'components-updated=1' "$sync_output"
+jq -s -e '.[4].body.syncComponents == "true" and .[4].body.componentsVisibility == "public"' "$REQUEST_LOG" >/dev/null
+jq -s -e '.[2].body.syncComponents == "false" and .[2].body.componentsVisibility == null' "$REQUEST_LOG" >/dev/null
+
+mkdir -p "$TEMP_DIR/app;web"
+printf '%s' '{"dependencies":{"zod":"^3.23.8"}}' > "$TEMP_DIR/app;web/package.json"
+printf '%s' '{"lockfileVersion":3}' > "$TEMP_DIR/app;web/package-lock.json"
+components_output="$TEMP_DIR/components-output"
+ALIAS=example-product \
+TOKEN=test-token \
+API_BASE="$api_base" \
+DEPENDENCIES_FILE="$TEMP_DIR/app;web/package.json" \
+DEPENDENCIES_LOCKFILE="$TEMP_DIR/app;web/package-lock.json" \
+COMPONENTS_VISIBILITY=public \
+GITHUB_OUTPUT="$components_output" \
+  bash "$ROOT_DIR/scripts/sync-components.sh"
+grep -Fxq 'components-created=2' "$components_output"
+jq -s -e '.[5].path == "/api/v1/integrations/components/resolve" and .[5].body.ecosystem == "npm" and .[5].body.includeDev == "false" and .[5].body.visibility == "public" and .[5].body.manifest == "{\"dependencies\":{\"zod\":\"^3.23.8\"}}" and .[5].body.lockfile == "{\"lockfileVersion\":3}"' "$REQUEST_LOG" >/dev/null
+
+printf '%s' 'module example.com/x' > "$TEMP_DIR/deps.txt"
+if ALIAS=example-product TOKEN=test-token API_BASE="$api_base" DEPENDENCIES_FILE="$TEMP_DIR/deps.txt" \
+  GITHUB_OUTPUT="$TEMP_DIR/invalid-output" bash "$ROOT_DIR/scripts/sync-components.sh"; then
+  echo 'Expected an unknown project file without dependencies-ecosystem to fail.' >&2
+  exit 1
+fi
+
+if SBOM_FILE="$sbom_file" SYNC_COMPONENTS=true DEPENDENCIES_FILE="$TEMP_DIR/app;web/package.json" bash "$ROOT_DIR/scripts/validate-report.sh"; then
+  echo 'Expected sync-components together with dependencies-file to fail.' >&2
+  exit 1
+fi
+
+if DEPENDENCIES_LOCKFILE="$TEMP_DIR/app;web/package-lock.json" bash "$ROOT_DIR/scripts/validate-report.sh"; then
+  echo 'Expected dependencies-lockfile without dependencies-file to fail.' >&2
+  exit 1
+fi
+
+if COMPONENTS_VISIBILITY=public bash "$ROOT_DIR/scripts/validate-report.sh"; then
+  echo 'Expected components-visibility without a component source to fail.' >&2
+  exit 1
+fi
+
 printf '%s' '{"spdxVersion":"SPDX-2.3"}' > "$TEMP_DIR/spdx.json"
 if ALIAS=example-product VERSION=1.2.3 TOKEN=test-token API_BASE="$api_base" SBOM_FILE="$TEMP_DIR/spdx.json" \
   GITHUB_OUTPUT="$TEMP_DIR/invalid-output" bash "$ROOT_DIR/scripts/add-sbom.sh"; then
@@ -92,6 +144,16 @@ fi
 
 if SBOM_PART=backend bash "$ROOT_DIR/scripts/validate-report.sh"; then
   echo 'Expected sbom-part without sbom-file to fail.' >&2
+  exit 1
+fi
+
+if SYNC_COMPONENTS=true bash "$ROOT_DIR/scripts/validate-report.sh"; then
+  echo 'Expected sync-components without sbom-file to fail.' >&2
+  exit 1
+fi
+
+if SBOM_FILE="$sbom_file" SYNC_COMPONENTS=yes bash "$ROOT_DIR/scripts/validate-report.sh"; then
+  echo 'Expected an invalid sync-components to fail.' >&2
   exit 1
 fi
 
@@ -162,6 +224,6 @@ if VERIFY_URL="$app_base/version.json" ENVIRONMENT='' CUSTOMER_ALIAS='' \
   exit 1
 fi
 
-jq -s -e 'length == 4' "$REQUEST_LOG" >/dev/null
+jq -s -e 'length == 6' "$REQUEST_LOG" >/dev/null
 
 echo 'Shared script integration tests passed.'

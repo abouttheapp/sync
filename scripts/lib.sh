@@ -35,6 +35,7 @@ write_output() {
 
 # Multipart POST: endpoint, token, file part ("name=@path;type=...;filename=..."), then text fields as "name=value".
 # Text fields use --form-string, so values starting with @ or < and values containing ;type= are sent literally.
+# A further file part is passed among the fields with the prefix "file:".
 post_form() {
   local endpoint="$1"
   local token="$2"
@@ -49,7 +50,11 @@ post_form() {
   require_command curl
   require_command jq
   for field in "$@"; do
-    form_args+=(--form-string "$field")
+    if [[ "$field" == file:* ]]; then
+      form_args+=(--form "${field#file:}")
+    else
+      form_args+=(--form-string "$field")
+    fi
   done
   form_args+=(--form "$file_part")
   response_file=$(mktemp)
@@ -77,6 +82,25 @@ post_form() {
   fi
 
   printf '%s' "$response"
+}
+
+# Ecosystem of a project file by its name; empty when the name is not recognised.
+detect_ecosystem() {
+  local name
+  name=$(basename -- "$1")
+  case "$name" in
+    package.json|package-lock.json) echo npm ;;
+    *.csproj|*.fsproj|*.vbproj|packages.config|Directory.Packages.props|packages.lock.json) echo nuget ;;
+    requirements*.txt|pyproject.toml|Pipfile|Pipfile.lock|poetry.lock|uv.lock|pdm.lock) echo python ;;
+    composer.json|composer.lock) echo composer ;;
+    Cargo.toml|Cargo.lock) echo cargo ;;
+    go.mod) echo go ;;
+    pubspec.yaml|pubspec.lock) echo pub ;;
+    Podfile|Podfile.lock) echo cocoapods ;;
+    Package.swift|Package.resolved|Cartfile|Cartfile.resolved) echo swift ;;
+    pom.xml|*.gradle|*.gradle.kts|libs.versions.toml|gradle.lockfile) echo maven ;;
+    *) echo "" ;;
+  esac
 }
 
 post_json() {

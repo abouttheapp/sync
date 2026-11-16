@@ -95,7 +95,8 @@ The main action performs these operations in order:
 1. If `verify-url` is present, wait until the deployed app reports the version.
 2. Upsert the version and its changelog for the product identified by `alias`.
 3. If both `customer-alias` and `environment` are present, append an installation event for that version.
-4. If `sbom-file` is present, attach the SBOM to that version.
+4. If `sbom-file` is present, attach the SBOM to that version. With `sync-components: true`, also record its direct dependencies as product components.
+5. If `dependencies-file` is present, record the direct dependencies from that project file as product components.
 
 Version upserts are idempotent for the same product and version. Installations are intentionally append-only: rerunning a workflow with installation inputs records another installation event. The SBOM is uploaded last, so a rejected SBOM fails the step without preventing the version and the installation from being recorded.
 
@@ -120,6 +121,58 @@ With `sbom-file`, the action uploads a CycloneDX JSON SBOM (versions 1.4 to 1.7)
 ```
 
 `@cyclonedx/cyclonedx-npm` reads the installed `node_modules`, so install the dependencies first. The file is compressed before the upload and may contain up to 10 MB of JSON. `sbom-part` names the part of the app the SBOM describes, for example `backend`, `web` or `ios`. Leave it empty for the whole app. A new SBOM of the same version and part replaces the previous one, which stays in the history. SBOMs are visible only to members of your workspace.
+
+## Keep product components up to date
+
+The action can keep the Components & licenses list of the product up to date after every release, which you can show on the About page. The list is updated from the project file of your app (`dependencies-file`) or from an SBOM (`sync-components`), one of them per step.
+
+Components are matched by name regardless of case. A new dependency is added as a private component unless `components-visibility` sets another visibility. An existing component gets the new version and license and keeps its visibility, category, description and link. Components missing from the build are not removed.
+
+### From the project file
+
+With `dependencies-file`, AboutTheApp reads the direct dependencies from the project file and looks up their licenses in the package registry:
+
+```yaml
+- uses: abouttheapp/sync@v1
+  with:
+    token: ${{ secrets.ABOUTTHEAPP_TOKEN }}
+    alias: my-app
+    version: ${{ github.ref_name }}
+    dependencies-file: package.json
+    dependencies-lockfile: package-lock.json
+```
+
+| Ecosystem | `dependencies-ecosystem` | Project file | Lockfile |
+| --- | --- | --- | --- |
+| npm | `npm` | `package.json` | `package-lock.json` |
+| NuGet | `nuget` | `.csproj`, `.fsproj`, `.vbproj`, `Directory.Packages.props` or `packages.config` | `packages.lock.json` or `Directory.Packages.props` |
+| Python | `python` | `requirements.txt`, `pyproject.toml` or `Pipfile` | `poetry.lock`, `uv.lock`, `pdm.lock` or `Pipfile.lock` |
+| Composer | `composer` | `composer.json` | `composer.lock` |
+| Rust | `cargo` | `Cargo.toml` | `Cargo.lock` |
+| Go | `go` | `go.mod` | none |
+| Flutter and Dart | `pub` | `pubspec.yaml` | `pubspec.lock` |
+| CocoaPods | `cocoapods` | `Podfile` or `Podfile.lock` | `Podfile.lock` |
+| Swift Package Manager and Carthage | `swift` | `Package.resolved`, `Package.swift` or `Cartfile` | `Cartfile.resolved` |
+| Java and Kotlin | `maven` | `pom.xml`, `gradle/libs.versions.toml` or `build.gradle(.kts)` | `gradle.lockfile` |
+
+The ecosystem is detected from the file name; set `dependencies-ecosystem` when the name differs, for example `requirements-prod.txt` works but `deps.txt` does not. Without a lockfile, only versions written without a range are exact. Development dependencies are skipped unless `dependencies-include-dev` is `true`. One request handles up to 500 dependencies; for an app with several parts, add the action step once per project file.
+
+### From an SBOM
+
+With `sync-components: true`, the direct dependencies from the SBOM also update the Components & licenses list of the product, which you can show on the About page:
+
+```yaml
+- uses: abouttheapp/sync@v1
+  with:
+    token: ${{ secrets.ABOUTTHEAPP_TOKEN }}
+    alias: my-app
+    version: ${{ github.ref_name }}
+    sbom-file: sbom.cdx.json
+    sbom-part: web
+    sync-components: true
+```
+
+The SBOM needs a dependency graph of its root component (`metadata.component` and `dependencies`), which tells direct dependencies apart; CycloneDX generators such as `@cyclonedx/cyclonedx-npm`, `cyclonedx-dotnet`, `cyclonedx-py` or `cargo-cyclonedx` write it. An SBOM without it is rejected when `sync-components` is `true`. Generate the SBOM without development dependencies (for example `--omit dev`) unless you want to list them.
 
 ## Verify the deployment
 
@@ -202,6 +255,12 @@ Direct `changelog` text cannot be combined with `changelog-source: git-log` or `
 | `verify-interval` | no | `10` | Seconds between checks of `verify-url`. |
 | `sbom-file` | no | empty | Path to a CycloneDX JSON SBOM, optionally gzip compressed. |
 | `sbom-part` | no | empty | App part the SBOM describes, for example `backend` or `ios`. Requires `sbom-file`. |
+| `sync-components` | no | `false` | `true` records the direct dependencies from `sbom-file` as product components. Requires `sbom-file`. |
+| `dependencies-file` | no | empty | Project file whose direct dependencies update product components. |
+| `dependencies-lockfile` | no | empty | File with exact versions for `dependencies-file`. Requires `dependencies-file`. |
+| `dependencies-ecosystem` | no | empty | `npm`, `nuget`, `python`, `composer`, `cargo`, `go`, `pub`, `cocoapods`, `swift` or `maven`; empty detects it from the file name. |
+| `dependencies-include-dev` | no | `false` | `true` also records development dependencies. Requires `dependencies-file`. |
+| `components-visibility` | no | empty | `public` or `private` for components added by `sync-components` or `dependencies-file`; empty adds them as private. |
 | `api-base` | no | `https://aboutthe.app/api/v1` | API base URL, primarily for testing. |
 
 Installation-specific options are rejected unless both `customer-alias` and `environment` are present.
@@ -213,6 +272,8 @@ Installation-specific options are rejected unless both `customer-alias` and `env
 | `version-id` | Identifier of the registered version. |
 | `installation-id` | Identifier of the installation; empty when no installation was requested. |
 | `sbom-id` | Identifier of the uploaded SBOM; empty when no `sbom-file` was given. |
+| `components-created` | Number of product components added by `sync-components` or `dependencies-file`; empty without them. |
+| `components-updated` | Number of product components whose version or license changed; empty without `sync-components` or `dependencies-file`. |
 
 ## Individual operations
 
